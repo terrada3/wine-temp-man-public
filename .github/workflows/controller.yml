@@ -1,0 +1,42 @@
+name: Wine Temp Controller
+
+on:
+  workflow_dispatch:
+
+# repo に state/ を commit & push するので必要
+permissions:
+  contents: write
+
+# 5分おきに外部から叩くので、重複実行を潰す（同時に走らない）
+concurrency:
+  group: wine-temp-controller
+  cancel-in-progress: true
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq bc
+
+      - name: Make scripts executable
+        run: chmod +x ./*.sh
+
+      - name: Run planner and worker
+        env:
+          # SwitchBotは repo secrets に入れておく（Settings → Secrets and variables → Actions）
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          DEVICE_ID: ${{ secrets.DEVICE_ID }}
+          BOT_DEVICE_ID: ${{ secrets.BOT_DEVICE_ID }}
+        run: |
+          ./planner.sh
+          ./worker.sh

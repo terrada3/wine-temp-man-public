@@ -1,0 +1,44 @@
+name: wine-cave-planner
+on:
+  # schedule:
+  #   - cron: "3-58/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wine-cave
+  cancel-in-progress: false
+
+jobs:
+  planner:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run planner
+        env:
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          BOT_DEVICE_ID: ${{ secrets.BOT_DEVICE_ID }}
+          DEVICE_ID: ${{ secrets.DEVICE_ID }}
+          THRESH_ON: "8.0"
+          THRESH_OFF: "14.1"
+          ON_SECONDS: "300"
+        working-directory: ${{ github.workspace }}
+        run: |
+          ls -la
+          chmod +x ./planner.sh
+           ./planner.sh
+      - name: Commit state if changed
+        run: |
+          if git diff --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/
+          git commit -m "state: schedule wine cave action"
+          git push

@@ -1,0 +1,39 @@
+name: wine-cave-worker
+on:
+  # schedule:
+  #   - cron: "3-58/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wine-cave
+  cancel-in-progress: false
+
+jobs:
+  worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run worker
+        env:
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          BOT_DEVICE_ID: ${{ secrets.BOT_DEVICE_ID }}
+        run: |
+          chmod +x ./*.sh
+          ./worker.sh
+
+      - name: Commit state if changed
+        run: |
+          if git diff --quiet; then
+            echo "no changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add state/
+          git commit -m "state: clear wine cave action"
+          git push
