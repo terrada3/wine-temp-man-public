@@ -31,6 +31,10 @@ jobs:
 
       - name: Run planner and worker
         env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # こっちは勝手に入るけど、明示してもOK
+          GITHUB_REPOSITORY: ${{ github.repository }}
+
           SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
           SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
           DEVICE_ID: ${{ secrets.DEVICE_ID }}
