@@ -67,32 +67,39 @@ state_write_json() {
   local new_json="$1"
 
   # validate json
-  python3 -c 'import json,sys; json.loads(sys.argv[1]);' "$new_json" >/dev/null
+  python3 -c 'import json,sys; json.loads(sys.argv[1])' "$new_json" >/dev/null
 
-  local body; body="$(issue_get_body)"
+  local body
+  body="$(issue_get_body)"
+
   local updated
   updated="$(
-    STATE_BEGIN="$STATE_BEGIN" STATE_END="$STATE_END" \
-    python3 - "$new_json" <<'PY' <<<"$body"
+    STATE_BEGIN="$STATE_BEGIN" STATE_END="$STATE_END" NEW_JSON="$new_json" \
+    python3 -c '
 import os,re,sys
-body=sys.stdin.read()
-begin=os.environ["STATE_BEGIN"]
-end=os.environ["STATE_END"]
-new_json=sys.argv[1]
-block=f"{begin}\n{new_json}\n{end}"
+
+body = sys.stdin.read()
+begin = os.environ["STATE_BEGIN"]
+end   = os.environ["STATE_END"]
+new_json = os.environ["NEW_JSON"]
+
+block = f"{begin}\n{new_json}\n{end}"
 
 if begin in body and end in body:
-  body=re.sub(re.escape(begin)+r".*?"+re.escape(end), block, body, flags=re.S)
+    body = re.sub(re.escape(begin)+r".*?"+re.escape(end),
+                  block, body, flags=re.S)
 else:
-  body=(body.rstrip()+"\n\n" if body.strip() else "") + block + "\n"
+    body = (body.rstrip()+"\n\n" if body.strip() else "") + block + "\n"
+
 print(body)
-PY
+' <<<"$body"
   )"
 
   gh_api PATCH "${GH_API}/repos/${GITHUB_REPOSITORY}/issues/${GH_STATE_ISSUE_NUMBER}" \
     -d "$(python3 -c 'import json,sys; print(json.dumps({"body": sys.stdin.read()}))' <<<"$updated")" \
     >/dev/null
 }
+
 
 # ----- state accessors -----
 get_latch_on() {
