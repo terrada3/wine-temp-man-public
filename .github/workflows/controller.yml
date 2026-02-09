@@ -31,7 +31,7 @@ jobs:
 
       - name: Run planner and worker
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ github.token }}
           # こっちは勝手に入るけど、明示してもOK
           GITHUB_REPOSITORY: ${{ github.repository }}
 

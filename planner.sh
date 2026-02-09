@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# planner.sh (Issue state store version - safe)
 set -euo pipefail
 
 # ====== config ======
@@ -8,8 +9,8 @@ OFF_DELAY=240        # seconds
 
 # GitHub Issue state store
 : "${GITHUB_REPOSITORY:?}"          # e.g. terrada3/wine-temp-man-public
-: "${GITHUB_TOKEN:?}"               # provided by Actions
-: "${GH_STATE_ISSUE_NUMBER:?}"      # set in workflow env/vars
+: "${GITHUB_TOKEN:?}"               # must be provided via workflow env
+: "${GH_STATE_ISSUE_NUMBER:?}"      # issue number storing state
 
 GH_API="https://api.github.com"
 STATE_BEGIN="<!-- STATE_BEGIN -->"
@@ -24,59 +25,60 @@ echo "planner: now=$NOW temp=$TEMP"
 gt() { (( $(echo "$1 > $2" | bc -l) )); }
 le() { (( $(echo "$1 <= $2" | bc -l) )); }
 
-# ----- GitHub API helpers -----
+# ----- GitHub Issue state store helpers (safe) -----
 gh_api() {
+  if [[ $# -lt 2 ]]; then
+    echo "gh_api: missing args" >&2
+    return 2
+  fi
   local method="$1"; shift
   local url="$1"; shift
   curl -sS -X "$method" \
     -H "Authorization: Bearer ${GITHUB_TOKEN}" \
     -H "Accept: application/vnd.github+json" \
-    "${url}" "$@"
+    "$url" "$@"
 }
 
 issue_get_body() {
   gh_api GET "${GH_API}/repos/${GITHUB_REPOSITORY}/issues/${GH_STATE_ISSUE_NUMBER}" \
-    | python3 - <<'PY'
-import json,sys
-print(json.load(sys.stdin).get("body") or "")
-PY
+    | python3 -c 'import json,sys; print((json.load(sys.stdin).get("body") or ""))'
 }
 
 state_read_json() {
   local body; body="$(issue_get_body)"
-  python3 - <<PY
-import re,sys,json
+  STATE_BEGIN="$STATE_BEGIN" STATE_END="$STATE_END" \
+  python3 -c '
+import os,re,sys,json
 body=sys.stdin.read()
-begin=re.escape("${STATE_BEGIN}")
-end=re.escape("${STATE_END}")
+begin=re.escape(os.environ["STATE_BEGIN"])
+end=re.escape(os.environ["STATE_END"])
 m=re.search(begin+r"(.*?)"+end, body, re.S)
 if not m:
   print("{}"); sys.exit(0)
 raw=m.group(1).strip()
 try:
-  json.loads(raw)
-  print(raw)
+  json.loads(raw); print(raw)
 except Exception:
   print("{}")
-PY <<<"$body"
+' <<<"$body"
 }
 
 state_write_json() {
   local new_json="$1"
+
   # validate json
-  python3 - <<'PY' <<<"$new_json" >/dev/null
-import json,sys
-json.load(sys.stdin)
-PY
+  python3 -c 'import json,sys; json.loads(sys.argv[1]);' "$new_json" >/dev/null
 
   local body; body="$(issue_get_body)"
   local updated
-  updated="$(python3 - <<PY
-import re,sys
+  updated="$(
+    STATE_BEGIN="$STATE_BEGIN" STATE_END="$STATE_END" \
+    python3 - "$new_json" <<'PY' <<<"$body"
+import os,re,sys
 body=sys.stdin.read()
-begin="${STATE_BEGIN}"
-end="${STATE_END}"
-new_json=${new_json!r}
+begin=os.environ["STATE_BEGIN"]
+end=os.environ["STATE_END"]
+new_json=sys.argv[1]
 block=f"{begin}\n{new_json}\n{end}"
 
 if begin in body and end in body:
@@ -84,71 +86,67 @@ if begin in body and end in body:
 else:
   body=(body.rstrip()+"\n\n" if body.strip() else "") + block + "\n"
 print(body)
-PY <<<"$body")"
+PY
+  )"
 
   gh_api PATCH "${GH_API}/repos/${GITHUB_REPOSITORY}/issues/${GH_STATE_ISSUE_NUMBER}" \
-    -d "$(python3 - <<PY
-import json,sys
-print(json.dumps({"body": sys.stdin.read()}))
-PY <<<"$updated")" >/dev/null
+    -d "$(python3 -c 'import json,sys; print(json.dumps({"body": sys.stdin.read()}))' <<<"$updated")" \
+    >/dev/null
 }
 
 # ----- state accessors -----
 get_latch_on() {
   local st; st="$(state_read_json)"
-  python3 - <<'PY' <<<"$st"
-import json,sys
-st=json.load(sys.stdin)
-print(st.get("heater_on_at",""))
-PY
+  python3 -c 'import json,sys; st=json.load(sys.stdin); print(st.get("heater_on_at",""))' <<<"$st"
 }
 
 set_latch_on() {
   local on_at="$1"
   local st; st="$(state_read_json)"
-  python3 - <<PY <<<"$st" | state_write_json "$(cat)"
+  local merged
+  merged="$(python3 - "$st" "$on_at" <<'PY'
 import json,sys
-st=json.load(sys.stdin)
-st["heater_on_at"]=int("${on_at}")
-# OFF予約は低温側では作らない方針なので残ってたら消す（念のため）
+st=json.loads(sys.argv[1] or "{}")
+on_at=int(sys.argv[2])
+st["heater_on_at"]=on_at
+# 低温側では OFF予約は作らない方針（念のため残ってたら消す）
 st.pop("off", None)
 print(json.dumps(st, ensure_ascii=False))
 PY
+)"
+  state_write_json "$merged"
 }
 
 has_off_scheduled() {
   local st; st="$(state_read_json)"
-  python3 - <<'PY' <<<"$st"
-import json,sys
-st=json.load(sys.stdin)
-print("1" if isinstance(st.get("off"), dict) else "0")
-PY
+  python3 -c 'import json,sys; st=json.load(sys.stdin); print("1" if isinstance(st.get("off"), dict) else "0")' <<<"$st"
 }
 
 get_off_at() {
   local st; st="$(state_read_json)"
-  python3 - <<'PY' <<<"$st"
-import json,sys
-st=json.load(sys.stdin)
-off=st.get("off") or {}
-print(off.get("off_at",""))
-PY
+  python3 -c 'import json,sys; st=json.load(sys.stdin); off=st.get("off") or {}; v=off.get("off_at"); print("" if v is None else str(v))' <<<"$st"
 }
 
 set_off_schedule() {
   local off_at="$1"
   local st; st="$(state_read_json)"
-  python3 - <<PY <<<"$st" | state_write_json "$(cat)"
+  local merged
+  merged="$(python3 - "$st" "$off_at" "$NOW" "$TEMP" <<'PY'
 import json,sys
-st=json.load(sys.stdin)
+st=json.loads(sys.argv[1] or "{}")
+off_at=int(sys.argv[2])
+now=int(sys.argv[3])
+temp=float(sys.argv[4])
 st["off"]={
   "reason": "temp_high",
-  "off_at": int("${off_at}"),
-  "created_at": int("${NOW}"),
-  "temp": float("${TEMP}")
+  "off_at": off_at,
+  "created_at": now,
+  "temp": temp
 }
 print(json.dumps(st, ensure_ascii=False))
 PY
+)"
+  state_write_json "$merged"
 }
 
 # ====== LOW: immediate ON (latched) ======
@@ -176,6 +174,7 @@ fi
 if gt "$TEMP" "$THRESH_HIGH"; then
   LATCH_ON_AT="$(get_latch_on)"
   if [[ -z "$LATCH_ON_AT" ]]; then
+    # システムがONにしたわけじゃないなら、トグル事故防止のため何もしない
     echo "planner: temp high but heater_on latch not set -> do nothing"
     exit 0
   fi
