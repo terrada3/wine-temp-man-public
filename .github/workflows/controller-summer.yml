@@ -1,0 +1,40 @@
+name: Wine Temp Controller (For Cooler Mode Air Conditionar)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: wine-temp-controller-summer
+  cancel-in-progress: true
+
+env:
+  GH_STATE_ISSUE_NUMBER: 1
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq bc
+
+      - name: Make scripts executable
+        run: chmod +x ./*.sh
+
+      - name: Run summer planner and worker
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          SWITCHBOT_TOKEN: ${{ secrets.SWITCHBOT_TOKEN }}
+          SWITCHBOT_SECRET: ${{ secrets.SWITCHBOT_SECRET }}
+          DEVICE_ID: ${{ secrets.DEVICE_ID }}
+          BOT_DEVICE_ID: ${{ secrets.BOT_DEVICE_ID }}
+        run: |
+          ./summer_planner.sh
+          ./summer_worker.sh
