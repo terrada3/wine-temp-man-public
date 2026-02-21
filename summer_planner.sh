@@ -3,7 +3,7 @@
 set -euo pipefail
 
 # ====== config ======
-THRESH_COOL_ON="14.0"     # > 14℃ で冷房ON（press）※一度だけ
+THRESH_COOL_ON="12.0"     # > 14℃ で冷房ON（press）※一度だけ
 THRESH_COOL_OFF="8.0"     # < 8℃ で冷房OFF（press）※自分がONにした時だけ
 # ※もし「8℃を超えたらoff」を本当にやりたいなら、下の判定 lt を gt に変える
 
